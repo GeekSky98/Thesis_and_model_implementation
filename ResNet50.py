@@ -1,3 +1,4 @@
+import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow import keras
@@ -14,7 +15,7 @@ n_class = 2
 img_size = 320
 n_batch = 32
 epoch = 50
-
+AUTOTUNE = tf.data.AUTOTUNE
 
 cur_dir = os.getcwd()
 data_dir = os.path.join(cur_dir, 'data', 'dataset')
@@ -26,7 +27,6 @@ val_dir_cat = os.path.join(validation_dir, 'cats')
 train_dir_dog = os.path.join(train_dir, 'dogs')
 val_dir_dog = os.path.join(validation_dir, 'dogs')
 dir_list = [train_dir_cat, val_dir_cat, train_dir_dog, val_dir_dog]
-
 
 for dir in dir_list:
     temp_list = [fname for fname in os.listdir(dir)]
@@ -42,7 +42,6 @@ for files in os.listdir(train_dir_dog)[100:140]:
     file = os.path.join(train_dir_dog, files)
     print(np.array(Image.open(file)).shape)
 
-
 train_ds = keras.preprocessing.image_dataset_from_directory(
     train_dir,
     shuffle = True,
@@ -57,6 +56,8 @@ val_ds = keras.preprocessing.image_dataset_from_directory(
     batch_size = n_batch
 )
 
+train_ds = train_ds.prefetch(AUTOTUNE)
+val_ds = val_ds.prefetch(AUTOTUNE)
 
 def ResNet50_residual_block(input_layer, n_layer, channel, stride):
 
@@ -118,7 +119,6 @@ filename = 'checkpoint-epoch-{}-batch-{}-trial-001.h5'.format(epoch, n_batch)
 checkpoint = ModelCheckpoint(filename, monitor='val_loss', verbose=1, save_best_only=True, mode='auto')
 earlystopping = EarlyStopping(monitor='val_accuracy', patience=10)
 
-
 optimizer = keras.optimizers.Adam(
     learning_rate=0.0002,
     beta_1=0.93,
@@ -142,4 +142,3 @@ resnet_50.fit(
     verbose=1,
     callbacks=[checkpoint, earlystopping]
 )
-
