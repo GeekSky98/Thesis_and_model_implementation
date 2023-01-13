@@ -1,4 +1,3 @@
-import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow import keras
@@ -7,12 +6,15 @@ from keras.models import Model
 from tensorflow.keras.applications import *
 import os
 from PIL import Image
+from keras.callbacks import ModelCheckpoint, EarlyStopping
 
 layer_idx = [3, 4, 6, 3]
 channel_idx = [64, 128, 256, 512]
 n_class = 2
-img_size = 1
+img_size = 320
 n_batch = 32
+epoch = 50
+
 
 cur_dir = os.getcwd()
 data_dir = os.path.join(cur_dir, 'data', 'dataset')
@@ -24,6 +26,7 @@ val_dir_cat = os.path.join(validation_dir, 'cats')
 train_dir_dog = os.path.join(train_dir, 'dogs')
 val_dir_dog = os.path.join(validation_dir, 'dogs')
 dir_list = [train_dir_cat, val_dir_cat, train_dir_dog, val_dir_dog]
+
 
 for dir in dir_list:
     temp_list = [fname for fname in os.listdir(dir)]
@@ -39,10 +42,18 @@ for files in os.listdir(train_dir_dog)[100:140]:
     file = os.path.join(train_dir_dog, files)
     print(np.array(Image.open(file)).shape)
 
+
 train_ds = keras.preprocessing.image_dataset_from_directory(
     train_dir,
     shuffle = True,
-    img_size = (img_size, img_size),
+    image_size = (img_size, img_size),
+    batch_size = n_batch
+)
+
+val_ds = keras.preprocessing.image_dataset_from_directory(
+    validation_dir,
+    shuffle = True,
+    image_size = (img_size, img_size),
     batch_size = n_batch
 )
 
@@ -86,7 +97,7 @@ def build_ResNet50(img_size):
     output = MaxPool2D(pool_size=(3, 3), strides=2)(output)
 
     prev_channel = 64
-    for (n_layer, channel) in enumerate(zip(layer_idx, channel_idx)):
+    for i, (n_layer, channel) in enumerate(zip(layer_idx, channel_idx)):
         stride = 1 if channel == prev_channel else 2
         output = ResNet50_residual_block(output, n_layer=n_layer, channel=channel, stride=stride)
         prev_channel = channel
@@ -99,6 +110,36 @@ def build_ResNet50(img_size):
 
     return model
 
-resnet_50 = build_ResNet50()
+resnet_50 = build_ResNet50(img_size)
 
 resnet_50.summary()
+
+filename = 'checkpoint-epoch-{}-batch-{}-trial-001.h5'.format(epoch, n_batch)
+checkpoint = ModelCheckpoint(filename, monitor='val_loss', verbose=1, save_best_only=True, mode='auto')
+earlystopping = EarlyStopping(monitor='val_accuracy', patience=10)
+
+
+optimizer = keras.optimizers.Adam(
+    learning_rate=0.0002,
+    beta_1=0.93,
+    beta_2=0.999,
+    epsilon=2e-08,
+    amsgrad=True
+)
+
+losses = keras.losses.SparseCategoricalCrossentropy()
+
+resnet_50.compile(
+    loss = losses,
+    optimizer = optimizer,
+    metrics = ["accuracy"]
+)
+
+resnet_50.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=epoch,
+    verbose=1,
+    callbacks=[checkpoint, earlystopping]
+)
+
