@@ -2,11 +2,10 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 from tensorflow import keras
-from keras.layers import Conv2D, BatchNormalization, Activation, Input, MaxPooling2D, Dropout, Flatten, Dense
-from keras.models import Model, Sequential
+from keras.layers import Conv2D, Input, MaxPooling2D, Flatten, Dense
+from keras.models import Model
 import os
 from keras.callbacks import ModelCheckpoint, EarlyStopping
-from tensorflow.keras import regularizers
 from PIL import Image
 from skimage.transform import resize
 

@@ -1,13 +1,12 @@
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow import keras
-from PIL import Image, ImageDraw
+from PIL import Image
 from skimage import color
-from skimage.transform import resize
 import numpy as np
-from keras.layers import Input, Conv2D, Conv2DTranspose, Flatten, Dense, GlobalAvgPool2D, concatenate, Dropout
-from keras.layers import BatchNormalization, Activation, MaxPool2D, Reshape
-from keras.models import Model, load_model, Sequential
+from keras.layers import Input, Conv2D, Conv2DTranspose, concatenate, Dropout
+from keras.layers import BatchNormalization, Activation, MaxPool2D
+from keras.models import Model
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import Sequence
 import gdown, zipfile, os, math

@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from tensorflow import keras
 from keras.layers import Conv2D, BatchNormalization, Activation, Input, MaxPool2D, Add, AveragePooling2D, Flatten, Dense
 from keras.models import Model
-from tensorflow.keras.applications import *
 import os
 from PIL import Image
 from keras.callbacks import ModelCheckpoint, EarlyStopping
