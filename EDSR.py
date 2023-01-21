@@ -2,6 +2,9 @@
 # 활성함수는 relu
 # psnr / L1 loss 사용
 
+import tensorflow as tf
+from keras.layers import Dense, Conv2D, Add,
+
 
 class EDSRModel(tf.keras.Model):
     def train_step(self, data):
@@ -59,9 +62,7 @@ def Upsampling(inputs, factor=2, **kwargs):
 
 
 def make_model(num_filters, num_of_residual_blocks):
-    # Flexible Inputs to input_layer
     input_layer = layers.Input(shape=(None, None, 3))
-    # Scaling Pixel Values
     x = layers.Rescaling(scale=1.0 / 255)(input_layer)
     x = x_new = layers.Conv2D(num_filters, 3, padding="same")(x)
 
@@ -91,3 +92,9 @@ optim_edsr = keras.optimizers.Adam(
 model.compile(optimizer=optim_edsr, loss="mae", metrics=[PSNR])
 # Training for more epochs will improve results
 model.fit(train_ds, epochs=100, steps_per_epoch=200, validation_data=val_ds)
+
+
+
+from keras.layers import Add, Conv2D, Input, Lambda
+from keras.models import Model
+from model.common import nomalize, pixel_shuffle, denormalize
