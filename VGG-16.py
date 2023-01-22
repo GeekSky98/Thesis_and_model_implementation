@@ -12,7 +12,7 @@ from skimage.transform import resize
 img_size = 256
 n_batch = 32
 n_class = 2
-epoch = 50
+epoch = 30
 n_conv = [2, 2, 3, 3, 3]
 filter = [64, 128, 256, 512, 512]
 AUTOTUNE = tf.data.AUTOTUNE
@@ -92,7 +92,7 @@ model.compile(
 model.fit(
     train_ds,
     validation_data=val_ds,
-    epochs=30,
+    epochs=epoch,
     callbacks=[checkpoint, earlystopping],
     verbose=1
 )
