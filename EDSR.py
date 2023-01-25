@@ -146,7 +146,7 @@ def build_edsr(filter=64, num_res=16):
 
 model = build_edsr()
 
-oprimizer = keras.optimizers.Adam(
+optimizer = keras.optimizers.Adam(
     learning_rate=keras.optimizers.schedules.PiecewiseConstantDecay(boundaries=[5000], values=[1e-4, 5e-5])
 )
 
@@ -158,7 +158,7 @@ def SSIM(y_true, y_pred):
 
 model.compile(
     loss = 'mae',
-    optimizer=oprimizer,
+    optimizer=optimizer,
     metrics=[PSNR, SSIM]
 )
 
