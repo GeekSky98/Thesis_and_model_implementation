@@ -1,83 +1,67 @@
+import matplotlib.pyplot as plt
 from keras.models import Sequential
 from keras.layers import Conv2D
 import tensorflow as tf
-import tensorflow_datasets as tfds
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+from skimage.transform import resize
+import numpy as np
+import os, math
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.utils import Sequence
 
 batch_size = 32
 epoch = 50
 AUTOTUNE = tf.data.AUTOTUNE
 
-div2k_data = tfds.image.Div2k(config="bicubic_x4")
-div2k_data.download_and_prepare()
+cur_dir = os.getcwd()
+data_dir = os.path.join(cur_dir, "data")
+last_data_dir = os.path.join(data_dir, "landscape_data")
 
-train = div2k_data.as_dataset(split="train", as_supervised=True)
-train_cache = train.cache()
+image_files = [file_name for file_name in os.listdir(last_data_dir) if os.path.splitext(file_name)[-1] == '.jpg']
+len(image_files)
 
-val = div2k_data.as_dataset(split="validation", as_supervised=True)
-val_cache = val.cache()
+data = np.array([np.array(Image.open(os.path.join(last_data_dir,image)))for image in image_files])
+print(f"data shape : {data.shape}")
 
-def flip_left_right(lowres_img, highres_img):
-    rn = tf.random.uniform(shape=(), maxval=1)
-    return tf.cond(
-        rn < 0.5,
-        lambda: (lowres_img, highres_img),
-        lambda: (
-            tf.image.flip_left_right(lowres_img),
-            tf.image.flip_left_right(highres_img),
-        ),
-    )
+data = data / data.max()
 
-def random_rotate(lowres_img, highres_img):
-    rn = tf.random.uniform(shape=(), maxval=4, dtype=tf.int32)
-    return tf.image.rot90(lowres_img, rn), tf.image.rot90(highres_img, rn)
+data_small = np.array([resize(img, (50, 50, 3)) for img in data])
 
+data_small_bicu = np.array([resize(img, (150, 150, 3)) for img in data_small])
 
-def random_crop(lowres_img, highres_img, hr_crop_size=96, scale=4):
-    lowres_crop_size = hr_crop_size // scale
-    lowres_img_shape = tf.shape(lowres_img)[:2]
+plt.imshow(np.concatenate([data[0], data_small_bicu[0]]))
+plt.show()
 
-    lowres_width = tf.random.uniform(
-        shape=(), maxval=lowres_img_shape[1] - lowres_crop_size + 1, dtype=tf.int32
-    )
-    lowres_height = tf.random.uniform(
-        shape=(), maxval=lowres_img_shape[0] - lowres_crop_size + 1, dtype=tf.int32
-    )
+train_x, val_x, train_y, val_y = train_test_split(data_small_bicu, data, test_size = 0.2, shuffle = True,
+                                                  random_state = 777)
 
-    highres_width = lowres_width * scale
-    highres_height = lowres_height * scale
+class Dataloader(Sequence):
 
-    lowres_img_cropped = lowres_img[
-        lowres_height : lowres_height + lowres_crop_size,
-        lowres_width : lowres_width + lowres_crop_size,
-    ]
-    highres_img_cropped = highres_img[
-        highres_height : highres_height + hr_crop_size,
-        highres_width : highres_width + hr_crop_size,
-    ]
+  def __init__(self, data_x, data_y, batch_size, shuffle=False):
+    self.x, self.y = data_x, data_y
+    self.batch_size = batch_size
+    self.shuffle = shuffle
+    self.on_epoch_end()
 
-    return lowres_img_cropped, highres_img_cropped
+  def __len__(self):
+    return math.ceil(len(self.x) / self.batch_size)
 
-def dataset_object(dataset_cache, training=True):
+  def __getitem__(self, idx):
+    indices = self.indices[idx * self.batch_size:(idx + 1) * self.batch_size]
 
-    ds = dataset_cache
-    ds = ds.map(
-        lambda lowres, highres: random_crop(lowres, highres, scale=4),
-        num_parallel_calls=AUTOTUNE,
-    )
+    batch_x = [self.x[i] for i in indices]
+    batch_y = [self.y[i] for i in indices]
 
-    if training:
-        ds = ds.map(random_rotate, num_parallel_calls=AUTOTUNE)
-        ds = ds.map(flip_left_right, num_parallel_calls=AUTOTUNE)
-    ds = ds.batch(batch_size)
+    return np.array(batch_x), np.array(batch_y)
 
-    if training:
-        ds = ds.repeat()
-    ds = ds.prefetch(buffer_size=AUTOTUNE)
-    return ds
+  def on_epoch_end(self):
+    self.indices = np.arange(len(self.x))
+    if self.shuffle == True:
+      np.random.shuffle(self.indices)
 
-train_ds = dataset_object(train_cache, training=True)
-val_ds = dataset_object(val_cache, training=False)
+train_ds = Dataloader(train_x, train_y, batch_size, shuffle = True)
+validation_ds = Dataloader(val_x, val_y, batch_size)
 
 model = Sequential()
 model.add(Conv2D(filters=64, kernel_size=9, padding='same', activation='relu', input_shape=(None, None, 3)))
@@ -92,18 +76,30 @@ def PSNR(y_true, y_pred):
 model.compile(
     loss='mse',
     optimizer='adam',
-    metrics=['PSNR']
+    metrics=[PSNR]
 )
 
-filename = 'checkpoint-epoch-{}-batch-{}-trial-001.h5'.format(epoch, batch_size)
+filename = 'checkpoint2-epoch-{}-batch-{}-trial-001.h5'.format(epoch, batch_size)
 checkpoint = ModelCheckpoint(filename, monitor='PSNR', verbose=1, save_best_only=True, mode='auto')
 earlystopping = EarlyStopping(monitor='PSNR', patience=20)
 
 model.fit(
     train_ds,
-    validation_data=val_ds,
+    validation_data=validation_ds,
     epochs=epoch,
-    steps_per_epoch=300,
     verbose=1,
     callbacks=[checkpoint, earlystopping]
 )
+
+
+def result(num):
+    low = val_x[num]
+    high = val_y[num]
+    pred = model.predict(tf.expand_dims(low, 0))
+
+    plt.imshow(np.concatenate([low, tf.squeeze(pred, 0), high], axis=-2))
+    plt.show()
+
+result(20)
+
+model.save('./model/SRCNN.h5')
