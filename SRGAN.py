@@ -1,9 +1,14 @@
-import tensorflow as tf
 import tensorflow_datasets as tfds
 import matplotlib.pyplot as plt
 from keras.layers import Conv2D, BatchNormalization, Input, Add, PReLU, Lambda, LeakyReLU, Dense
+from keras.losses import BinaryCrossentropy, MeanSquaredError
+import tensorflow as tf
 import numpy as np
 from keras.models import Model
+from tensorflow import keras
+from keras.applications.vgg19 import VGG19, preprocess_input
+import keras.applications.vgg19 as vgg
+from tensorflow.keras import optimizers
 
 hr_img_size = 100
 lr_img_size = 25
@@ -50,7 +55,7 @@ def disc_conv_block(input_layer, n_filter=64, first_step=False):
         x = LeakyReLU()(x)
     else:
         x = input_layer
-        for stride in range(2):
+        for stride in range(1,3):
             x = Conv2D(filters=n_filter, kernel_size=3, strides=stride, padding='same')(x)
             x = BatchNormalization()(x)
             x = LeakyReLU()(x)
@@ -100,5 +105,47 @@ def build_discriminator():
 
     return model
 
+vgg_transfer = vgg.VGG19(include_top=False, weights='imagenet', input_shape=(None, None, 3))
+vgg_transfer.summary()
+
+vgg_model = Model(vgg_transfer.input, vgg_transfer.get_layer('block5_conv4').output)
 
 
+generator = build_generator()
+discriminator = build_discriminator()
+
+def get_generator_loss(fake_output):
+    return BinaryCrossentropy(tf.ones_like(fake_output), fake_output, from_logits=False)
+
+def get_discriminator_loss(real_output, fake_output):
+    return BinaryCrossentropy(tf.ones_like(real_output), real_output) + \
+           BinaryCrossentropy(tf.zeros_like(fake_output), fake_output, from_logits=False)
+
+def get_content_loss_vgg(real, fake):
+    real, fake = vgg.preprocess_input(real), vgg.preprocess_input(fake)
+
+    real_feature_map = vgg_model(real) / 12.75
+    fake_feature_map = vgg_model(fake) / 12.75
+
+    return MeanSquaredError(real_feature_map, fake_feature_map)
+
+generator_optimizer = optimizers.Adam()
+discriminator_optimizer = optimizers.Adam()
+
+def gaaaan(learning_rate, real):
+    with tf.GradientTape() as generator_tape, tf.GradientTape() as discriminator_tape:
+        fake = generator(learning_rate, training=True)
+
+        real_out = discriminator(real, training=True)
+        fake_out = discriminator(fake, training=True)
+
+        perceptual_loss = get_content_loss_vgg(real, fake) + 1e-3 * get_generator_loss(fake_out)
+        discriminator_loss = get_discriminator_loss(real_out, fake_out)
+
+    generator_gradient = generator_tape.gradient(perceptual_loss, generator.trainable_variables)
+    discriminator_gradient = discriminator_tape(discriminator_loss, discriminator.trainable_variables)
+
+    generator_optimizer.apply_gradients(zip(generator_gradient, generator.trainable_variables))
+    discriminator_optimizer.apply_gradients(zip(discriminator_gradient, discriminator.trainable_variables))
+
+    return perceptual_loss, discriminator_loss
