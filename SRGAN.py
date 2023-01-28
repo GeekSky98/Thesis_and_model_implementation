@@ -8,7 +8,7 @@ from keras.models import Model
 from tensorflow import keras
 from keras.applications.vgg19 import VGG19, preprocess_input
 import keras.applications.vgg19 as vgg
-from tensorflow.keras import optimizers
+from tensorflow.keras import optimizers, metrics
 
 hr_img_size = 100
 lr_img_size = 25
@@ -132,14 +132,14 @@ def get_content_loss_vgg(real, fake):
 generator_optimizer = optimizers.Adam()
 discriminator_optimizer = optimizers.Adam()
 
-def gaaaan(learning_rate, real):
+def gaaaan(low_img, high_real):
     with tf.GradientTape() as generator_tape, tf.GradientTape() as discriminator_tape:
-        fake = generator(learning_rate, training=True)
+        fake = generator(low_img, training=True)
 
-        real_out = discriminator(real, training=True)
+        real_out = discriminator(high_real, training=True)
         fake_out = discriminator(fake, training=True)
 
-        perceptual_loss = get_content_loss_vgg(real, fake) + 1e-3 * get_generator_loss(fake_out)
+        perceptual_loss = get_content_loss_vgg(high_real, fake) + 1e-3 * get_generator_loss(fake_out)
         discriminator_loss = get_discriminator_loss(real_out, fake_out)
 
     generator_gradient = generator_tape.gradient(perceptual_loss, generator.trainable_variables)
@@ -149,3 +149,25 @@ def gaaaan(learning_rate, real):
     discriminator_optimizer.apply_gradients(zip(discriminator_gradient, discriminator.trainable_variables))
 
     return perceptual_loss, discriminator_loss
+
+generator_losses = metrics.Mean()
+discriminator_losses = metrics.Mean()
+
+for epoch in range(1, 2):
+    for i, (low_img, high_img) in enumerate(train):
+        g_loss, d_loss = gaaaan(low_img, high_img)
+
+        generator_losses.update_state(g_loss)
+        discriminator_losses.update_state(d_loss)
+
+        if (i + 1) % 10 == 0:
+            print(
+                f"EPOCH[{epoch}] - STEP[{i + 1}] \nGenerator_loss:{generator_losses.result():.4f} \nDiscriminator_loss:{discriminator_losses.result():.4f}",
+                end="\n\n")
+
+        if (i + 1) == 200:
+            break
+
+    generator_losses.reset_states()
+    discriminator_losses.reset_states()
+
