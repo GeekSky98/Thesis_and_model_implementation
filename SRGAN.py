@@ -9,6 +9,7 @@ from tensorflow import keras
 from keras.applications.vgg19 import VGG19, preprocess_input
 import keras.applications.vgg19 as vgg
 from tensorflow.keras import optimizers, metrics
+from skimage.transform import resize
 
 hr_img_size = 100
 lr_img_size = 25
@@ -171,3 +172,21 @@ for epoch in range(1, 2):
     generator_losses.reset_states()
     discriminator_losses.reset_states()
 
+def result(image):
+    image = np.array(image)
+    image = tf.cast(tf.expand_dims(image, axis=0), tf.float32)
+    pred = generator.predict(image)
+    pred = tf.clip_by_value(pred, 0, 255)
+    pred = tf.cast(round(pred), tf.uint8)
+
+    return tf.squeeze(np.array(pred), axis=0)
+
+def contrast(image):
+    hr_image = np.array(image)
+    img_height, img_width = hr_image.shape[0], hr_image.shape[1]
+    lr_image = resize(hr_image, (img_height//4, img_width//4, 3), 'bicubic')
+    srgan_image = result(lr_image)
+    bicubic_image = resize(lr_image, (img_height, img_width, 3), 'bicubic')
+
+    plt.imshow(np.concatenate([bicubic_image, srgan_image, hr_image], axis=1))
+    plt.show()
