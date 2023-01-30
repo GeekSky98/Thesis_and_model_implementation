@@ -1,27 +1,38 @@
 import tensorflow as tf
 from keras.layers import Dropout, AveragePooling2D, Dense, Conv2D, MaxPooling2D, Activation, Concatenate
-from keras.layers import GlobalAveragePooling2D, Flatten, Input
+from keras.layers import GlobalAveragePooling2D, Flatten, Input, LayerNormalization
 from keras.models import Model
 
-def inception_block(x_in, x1_f, x3r_f, x3_f, x5r_f, x5_f, po):
-    x1 = MaxPooling2D(pool_size=(3, 3), strides=(1, 1), padding='same')(x_in)
-    x1 = Conv2D(filters=po, kernel_size=(1, 1), padding="SAME")(x1)
+def inception_block(input_layer, x1_conv, x2_conv, x2_conv2, x3_conv, x3_conv2, x4_conv):
+    x1 = Conv2D(filters=x1_conv, kernel_size=(1, 1), padding="SAME")(input_layer)
     x1 = Activation('relu')(x1)
 
-    x2 = Conv2D(filters=x5r_f, kernel_size=(1, 1), padding="same")(x_in)
-    x2 = Conv2D(filters=x5_f, kernel_size=(5, 5), padding="same")(x2)
+    x2 = Conv2D(filters=x2_conv, kernel_size=(1, 1), padding="same")(input_layer)
+    x2 = Activation('relu')(x2)
+    x2 = Conv2D(filters=x2_conv2, kernel_size=(3, 3), padding="same")(x2)
     x2 = Activation('relu')(x2)
 
-    x3 = Conv2D(filters=x3r_f, kernel_size=(1, 1), padding="same")(x_in)
-    x3 = Conv2D(filters=x3_f, kernel_size=(3, 3), padding="same")(x3)
+    x3 = Conv2D(filters=x3_conv, kernel_size=(1, 1), padding="same")(input_layer)
+    x3 = Activation('relu')(x3)
+    x3 = Conv2D(filters=x3_conv2, kernel_size=(5, 5), padding="same")(x3)
     x3 = Activation('relu')(x3)
 
-    x4 = Conv2D(filters=x1_f, kernel_size=(1, 1), padding="same")(x_in)
+    x4 = MaxPooling2D(pool_size=(3, 3), strides=1, padding='same')(input_layer)
+    x4 = Conv2D(filters=x4_conv, kernel_size=(1, 1), padding="same")(x4)
     x4 = Activation('relu')(x4)
 
-    out = Concatenate()([x1, x2, x3, x4])
-    return out
+    return Concatenate([x1, x2, x3, x4], axis=-1)
 
+def build_googlenet():
+
+    inputs = Input((None, None, 3))
+
+    x_1 = Conv2D(filters=64, kernel_size=(7, 7), strides=2, activation='relu')(inputs)
+    x_1 = MaxPooling2D(pool_size=(3, 3), strides=2, padding='same')(x_1)
+    x_1 = LayerNormalization()(x_1)
+
+    x_2 = Conv2D(filters=64, kernel_size=(3, 3), strides=1, padding="same")(x_1)
+    x_2 = Conv2D(filters=192, kernel_size=(3, 3), strides=2, padding='same')(x_2)
 
 inputs = Input(shape=(224, 224, 3))
 x = Conv2D(filters=64, kernel_size=(7, 7), strides=(2, 2), padding="same")(inputs)
