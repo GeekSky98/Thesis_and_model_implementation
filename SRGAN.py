@@ -14,7 +14,7 @@ from skimage.transform import resize
 hr_img_size = 100
 lr_img_size = 25
 batch_size = 16
-epoch = 30
+epochs = 100
 AUTOTUNE = tf.data.AUTOTUNE
 
 train, valid = tfds.load("div2k/bicubic_x4", split = ['train', 'validation'], as_supervised=True)
@@ -80,11 +80,9 @@ def build_generator():
     for _ in range(2):
         x = gen_upsample(x)
 
-    outputs = Conv2D(filters=3, kernel_size=9, strides=1, padding='same')(x)
+    outputs = Conv2D(filters=3, kernel_size=9, strides=1, padding='same', activation='tanh')(x)
 
-    model = Model(inputs, outputs)
-
-    return model
+    return Model(inputs, outputs)
 
 def build_discriminator():
 
@@ -102,33 +100,32 @@ def build_discriminator():
     x = LeakyReLU()(x)
     outputs = Dense(1, activation='sigmoid')(x)
 
-    model = Model(inputs, outputs)
-
-    return model
+    return Model(inputs, outputs)
 
 vgg_transfer = vgg.VGG19(include_top=False, weights='imagenet', input_shape=(None, None, 3))
 vgg_transfer.summary()
 
 vgg_model = Model(vgg_transfer.input, vgg_transfer.get_layer('block5_conv4').output)
 
-
 generator = build_generator()
 discriminator = build_discriminator()
+mse = MeanSquaredError()
+binaryCE = BinaryCrossentropy()
 
 def get_generator_loss(fake_output):
-    return BinaryCrossentropy(tf.ones_like(fake_output), fake_output, from_logits=False)
+    return binaryCE(tf.ones_like(fake_output), fake_output)
 
 def get_discriminator_loss(real_output, fake_output):
-    return BinaryCrossentropy(tf.ones_like(real_output), real_output) + \
-           BinaryCrossentropy(tf.zeros_like(fake_output), fake_output, from_logits=False)
+    return binaryCE(tf.ones_like(real_output), real_output) + \
+           binaryCE(tf.zeros_like(fake_output), fake_output)
 
-def get_content_loss_vgg(real, fake):
-    real, fake = vgg.preprocess_input(real), vgg.preprocess_input(fake)
+def get_content_loss_vgg(hr_real, hr_fake):
+    hr_real, hr_fake = vgg.preprocess_input(hr_real), vgg.preprocess_input(hr_fake)
 
-    real_feature_map = vgg_model(real) / 12.75
-    fake_feature_map = vgg_model(fake) / 12.75
+    hr_real_feature_map = vgg_model(hr_real) / 12.75
+    hr_fake_feature_map = vgg_model(hr_fake) / 12.75
 
-    return MeanSquaredError(real_feature_map, fake_feature_map)
+    return mse(hr_real_feature_map, hr_fake_feature_map)
 
 generator_optimizer = optimizers.Adam()
 discriminator_optimizer = optimizers.Adam()
@@ -144,7 +141,7 @@ def gaaaan(low_img, high_real):
         discriminator_loss = get_discriminator_loss(real_out, fake_out)
 
     generator_gradient = generator_tape.gradient(perceptual_loss, generator.trainable_variables)
-    discriminator_gradient = discriminator_tape(discriminator_loss, discriminator.trainable_variables)
+    discriminator_gradient = discriminator_tape.gradient(discriminator_loss, discriminator.trainable_variables)
 
     generator_optimizer.apply_gradients(zip(generator_gradient, generator.trainable_variables))
     discriminator_optimizer.apply_gradients(zip(discriminator_gradient, discriminator.trainable_variables))
@@ -154,8 +151,8 @@ def gaaaan(low_img, high_real):
 generator_losses = metrics.Mean()
 discriminator_losses = metrics.Mean()
 
-for epoch in range(1, 2):
-    for i, (low_img, high_img) in enumerate(train):
+for epoch in range(epochs):
+    for i, (low_img, high_img) in enumerate(train_ds):
         g_loss, d_loss = gaaaan(low_img, high_img)
 
         generator_losses.update_state(g_loss)
@@ -184,9 +181,46 @@ def result(image):
 def contrast(image):
     hr_image = np.array(image)
     img_height, img_width = hr_image.shape[0], hr_image.shape[1]
-    lr_image = resize(hr_image, (img_height//4, img_width//4, 3), 'bicubic')
+    lr_image = resize(hr_image, (img_height//4, img_width//4, 3))
     srgan_image = result(lr_image)
-    bicubic_image = resize(lr_image, (img_height, img_width, 3), 'bicubic')
+    bicubic_image = resize(lr_image, (img_height, img_width, 3))
 
     plt.imshow(np.concatenate([bicubic_image, srgan_image, hr_image], axis=1))
     plt.show()
+
+from PIL import Image
+import cv2
+
+temp = Image.open('./data/sample.jpg')
+
+contrast(temp)
+
+generator.evaluate(val_ds)
+
+temp = np.array(temp)
+temp = resize(temp, (25, 25, 3))
+
+temp = tf.cast(tf.expand_dims(temp, 0), tf.float32)
+
+res = generator.predict(temp)
+res2 = tf.clip_by_value(res, 0, 255)
+res2 = tf.round(res2)
+res2 = tf.cast(res2, tf.uint8)
+plt.imshow(tf.squeeze(res, 0))
+plt.show()
+
+img = cv2.imread('./data/sample.jpg',1)
+img = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
+img_resize = cv2.resize(img,dsize=(0,0),fx=0.25,fy=0.25,interpolation=cv2.INTER_CUBIC)
+bicubic_hr = cv2.resize(img_resize,dsize=(0,0),fx=4,fy=4,interpolation=cv2.INTER_CUBIC)
+
+def apply_srgan(image):
+    image = tf.cast(image[np.newaxis, ...], tf.float32)
+    sr = generator.predict(image)
+    sr = tf.clip_by_value(sr, 0, 255)
+    sr = tf.round(sr)
+    sr = tf.cast(sr, tf.uint8)
+    return np.array(sr)[0]
+
+plt.imshow(apply_srgan(img_resize))
+plt.show()
