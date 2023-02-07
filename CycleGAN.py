@@ -1,18 +1,15 @@
-import functools
-import tqdm
 import tensorflow as tf
 import numpy as np
+import IPython.display as display
 from keras.layers import Conv2D, BatchNormalization, Activation, add, Input, Conv2DTranspose, ZeroPadding2D, LeakyReLU
 from tensorflow_addons.layers import InstanceNormalization
 from keras.models import Model
 from PIL import Image
-import os, random
 from keras.losses import MeanSquaredError, MeanAbsoluteError
 from tensorflow.keras import optimizers
-import IPython.display as display
-import imageio
 from glob import glob
-import IPython
+from tensorflow import keras
+import os, random, functools, tqdm, imageio, IPython
 # %load_ext tensorboard
 
 input_shape = (128, 128, 3)
@@ -39,9 +36,9 @@ test_b_path = os.path.join(data_path, 'testB')
 cyclegan_path = os.path.join(cur_path, 'cyclegan')
 checkpoint_dir = os.path.join(cyclegan_path, 'checkpoint')
 output_dir = os.path.join(cyclegan_path, 'output')
-sample_dir = os.path.join(output_dir, 'sample_training')
-summary_train_dir = os.path.join(output_dir, 'summaries', 'train')
-train_summary_writer = tf.summary.create_file_writer(summary_train_dir)
+epoch_image_dir = os.path.join(output_dir, 'epoch_image')
+train_summary_dir = os.path.join(output_dir, 'train_summary')
+train_summary_writer = tf.summary.create_file_writer(train_summary_dir)
 
 def get_image(path):
     dir = [file_name for file_name in os.listdir(path) if os.path.splitext(file_name)[-1] == '.jpg']
@@ -117,7 +114,7 @@ def Transpose(input_layer, filter, kernel_size, stride, use_bias=False):
 
     return x
 
-def generator():
+def build_generator():
 
     input = Input(input_shape)
 
@@ -136,7 +133,7 @@ def generator():
 
     return Model(input, output)
 
-def discriminator():
+def build_discriminator():
 
     input = Input(input_shape)
 
@@ -155,11 +152,11 @@ def discriminator():
 
     return Model(input, output)
 
-Gen_a_to_b = generator()
-Gen_b_to_a = generator()
+Gen_a_to_b = build_generator()
+Gen_b_to_a = build_generator()
 
-Disc_a = discriminator()
-Disc_b = discriminator()
+Disc_a = build_discriminator()
+Disc_b = build_discriminator()
 
 mse = MeanSquaredError()
 
@@ -443,14 +440,14 @@ with train_summary_writer.as_default():
                 A, B = next(test_iter)
                 A2B, B2A, A2B2A, B2A2B = sample_image(A, B)
                 img = immerge(np.concatenate([A, A2B, A2B2A, B, B2A, B2A2B], axis=0), n_rows=2)
-                imwrite(img, os.path.join(sample_dir, 'iter-%09d.jpg' % gen_optimizer.iterations.numpy()))
+                imwrite(img, os.path.join(epoch_image_dir, 'iter-%09d.jpg' % gen_optimizer.iterations.numpy()))
 
         checkpoint.save(ep)
 
 anim_file = 'cyclegan_vangogh.gif'
 
 with imageio.get_writer(anim_file, mode='I') as writer:
-    filenames = glob(os.path.join(sample_dir, 'iter*.jpg'))
+    filenames = glob(os.path.join(epoch_image_dir, 'iter*.jpg'))
     filenames = sorted(filenames)
     last = -1
     for i,filename in enumerate(filenames):
