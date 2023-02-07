@@ -1,6 +1,5 @@
 import functools
 import tqdm
-from experiment_utils import *
 import tensorflow as tf
 import numpy as np
 from keras.layers import Conv2D, BatchNormalization, Activation, add, Input, Conv2DTranspose, ZeroPadding2D, LeakyReLU
@@ -195,6 +194,23 @@ def gradient_penalty(tool, real, fake):
 
     return output
 
+class LinearDecay(keras.optimizers.schedules.LearningRateSchedule):
+
+    def __init__(self, initial_learning_rate, total_steps, step_decay):
+        super(LinearDecay, self).__init__()
+        self._initial_learning_rate = initial_learning_rate
+        self._steps = total_steps
+        self._step_decay = step_decay
+        self.current_learning_rate = tf.Variable(initial_value=initial_learning_rate, trainable=False, dtype=tf.float32)
+
+    def __call__(self, step):
+        self.current_learning_rate.assign(tf.cond(
+            step >= self._step_decay,
+            true_fn=lambda: self._initial_learning_rate * (1 - 1 / (self._steps - self._step_decay) * (step - self._step_decay)),
+            false_fn=lambda: self._initial_learning_rate
+        ))
+        return self.current_learning_rate
+
 gen_lr_scheduler = LinearDecay(LR, epochs * len_dataset, epoch_decay * len_dataset)
 disc_lr_scheduler = LinearDecay(LR, epochs * len_dataset, epoch_decay * len_dataset)
 
@@ -262,6 +278,30 @@ def train_disc(A, B, A2B, B2A):
             'D_A_gp': discriminator_A_GP,
             'D_B_gp': discriminator_B_GP}
 
+class ItemPool:
+
+    def __init__(self, pool_size=50):
+        self.pool_size = pool_size
+        self.items = []
+
+    def __call__(self, in_items):
+        if self.pool_size == 0:
+            return in_items
+
+        out_items = []
+        for in_item in in_items:
+            if len(self.items) < self.pool_size:
+                self.items.append(in_item)
+                out_items.append(in_item)
+            else:
+                if np.random.rand() > 0.5:
+                    idx = np.random.randint(0, len(self.items))
+                    out_item, self.items[idx] = self.items[idx], in_item
+                    out_items.append(out_item)
+                else:
+                    out_items.append(in_item)
+        return tf.stack(out_items, axis=0)
+
 A2B_pool = ItemPool(5)
 B2A_pool = ItemPool(5)
 
@@ -282,7 +322,95 @@ def sample_image(A, B):
     B2A2B = Gen_a_to_b(B2A, training=False)
     return A2B, B2A, A2B2A, B2A2B
 
-test_iter = iter(test_ds)
+def to_range(images, min_value=0.0, max_value=1.0, dtype=None):
+    dtype = dtype if dtype else images.dtype
+    return ((images + 1.) / 2. * (max_value - min_value) + min_value).astype(dtype)
+
+def imwrite(image, path, quality=95, **plugin_args):
+    iio.imsave(path, to_range(image, 0, 255, np.uint8), quality=quality, **plugin_args)
+
+def summary(name_data_dict,
+            step=None,
+            types=['mean', 'std', 'max', 'min', 'sparsity', 'histogram'],
+            historgram_buckets=None,
+            name='summary'):
+
+    def _summary(name, data):
+        if data.shape == ():
+            tf.summary.scalar(name, data, step=step)
+        else:
+            if 'mean' in types:
+                tf.summary.scalar(name + '-mean', tf.math.reduce_mean(data), step=step)
+            if 'std' in types:
+                tf.summary.scalar(name + '-std', tf.math.reduce_std(data), step=step)
+            if 'max' in types:
+                tf.summary.scalar(name + '-max', tf.math.reduce_max(data), step=step)
+            if 'min' in types:
+                tf.summary.scalar(name + '-min', tf.math.reduce_min(data), step=step)
+            if 'sparsity' in types:
+                tf.summary.scalar(name + '-sparsity', tf.math.zero_fraction(data), step=step)
+            if 'histogram' in types:
+                tf.summary.histogram(name, data, step=step, buckets=historgram_buckets)
+
+    with tf.name_scope(name):
+        for name, data in name_data_dict.items():
+            _summary(name, data)
+
+
+def immerge(images, n_rows=None, n_cols=None, padding=0, pad_value=0):
+    images = np.array(images)
+    n = images.shape[0]
+    if n_rows:
+        n_rows = max(min(n_rows, n), 1)
+        n_cols = int(n - 0.5) // n_rows + 1
+    elif n_cols:
+        n_cols = max(min(n_cols, n), 1)
+        n_rows = int(n - 0.5) // n_cols + 1
+    else:
+        n_rows = int(n ** 0.5)
+        n_cols = int(n - 0.5) // n_rows + 1
+
+    h, w = images.shape[1], images.shape[2]
+    shape = (h * n_rows + padding * (n_rows - 1),
+             w * n_cols + padding * (n_cols - 1))
+    if images.ndim == 4:
+        shape += (images.shape[3],)
+    img = np.full(shape, pad_value, dtype=images.dtype)
+
+    for idx, image in enumerate(images):
+        i = idx % n_cols
+        j = idx // n_cols
+        img[j * (h + padding):j * (h + padding) + h,
+            i * (w + padding):i * (w + padding) + w, ...] = image
+
+    return img
+
+class Checkpoint:
+    def __init__(self,
+                 checkpoint_kwargs,
+                 directory,
+                 max_to_keep=5,
+                 keep_checkpoint_every_n_hours=None):
+        self.checkpoint = tf.train.Checkpoint(**checkpoint_kwargs)
+        self.manager = tf.train.CheckpointManager(self.checkpoint, directory, max_to_keep, keep_checkpoint_every_n_hours)
+
+    def restore(self, save_path=None):
+        save_path = self.manager.latest_checkpoint if save_path is None else save_path
+        return self.checkpoint.restore(save_path)
+
+    def save(self, file_prefix_or_checkpoint_number=None, session=None):
+        if isinstance(file_prefix_or_checkpoint_number, str):
+            return self.checkpoint.save(file_prefix_or_checkpoint_number, session=session)
+        else:
+            return self.manager.save(checkpoint_number=file_prefix_or_checkpoint_number)
+
+    def __getattr__(self, attr):
+        if hasattr(self.checkpoint, attr):
+            return getattr(self.checkpoint, attr)
+        elif hasattr(self.manager, attr):
+            return getattr(self.manager, attr)
+        else:
+            self.__getattribute__(attr)
 
 checkpoint = Checkpoint(dict(G_A2B=Gen_a_to_b,
                                 G_B2A=Gen_b_to_a,
@@ -293,6 +421,8 @@ checkpoint = Checkpoint(dict(G_A2B=Gen_a_to_b,
                                 ep_cnt=ep_cnt),
                            checkpoint_dir,
                            max_to_keep=5)
+
+test_iter = iter(test_ds)
 
 with train_summary_writer.as_default():
     for ep in tqdm.trange(epochs, desc='Epoch Loop'):
@@ -316,3 +446,24 @@ with train_summary_writer.as_default():
                 imwrite(img, os.path.join(sample_dir, 'iter-%09d.jpg' % gen_optimizer.iterations.numpy()))
 
         checkpoint.save(ep)
+
+anim_file = 'cyclegan_vangogh.gif'
+
+with imageio.get_writer(anim_file, mode='I') as writer:
+    filenames = glob(os.path.join(sample_dir, 'iter*.jpg'))
+    filenames = sorted(filenames)
+    last = -1
+    for i,filename in enumerate(filenames):
+        frame = 2*(i**0.5)
+        if round(frame) > round(last):
+            last = frame
+        else:
+            continue
+        image = imageio.imread(filename)
+        writer.append_data(image)
+    image = imageio.imread(filename)
+    writer.append_data(image)
+
+
+if IPython.version_info > (6,2,0,''):
+    display.Image(filename=anim_file)
