@@ -1,5 +1,6 @@
 import tensorflow_datasets as tfds
 import matplotlib.pyplot as plt
+import IPython.display as display
 from keras.layers import Conv2D, BatchNormalization, Input, Add, PReLU, Lambda, LeakyReLU, Dense
 from keras.losses import BinaryCrossentropy, MeanSquaredError
 import tensorflow as tf
@@ -10,15 +11,25 @@ from keras.applications.vgg19 import VGG19, preprocess_input
 import keras.applications.vgg19 as vgg
 from tensorflow.keras import optimizers, metrics
 from skimage.transform import resize
+import time, os
 
 hr_img_size = 100
 lr_img_size = 25
 batch_size = 16
 epochs = 100
+lr = 1e-4
 AUTOTUNE = tf.data.AUTOTUNE
 
-train, valid = tfds.load("div2k/bicubic_x4", split = ['train', 'validation'], as_supervised=True)
 
+cur_dir = os.getcwd()
+
+cgan_path = os.path.join(cur_dir, 'cgan')
+checkpoint_dir = os.path.join(cgan_path, 'checkpoint')
+output_dir = os.path.join(cgan_path, 'output')
+
+train, val = tfds.load("div2k/bicubic_x4", split = ['train', 'validation'], as_supervised=True)
+
+'''
 def preprocessing(low_image, high_image):
     high_scaling = tf.cast(high_image / 255, tf.float32)
     high_crop = tf.image.random_crop(high_scaling, size=(hr_img_size, hr_img_size, 3))
@@ -26,8 +37,19 @@ def preprocessing(low_image, high_image):
 
     return low_crop, high_crop
 
-train_ds = train.map(preprocessing).shuffle(buffer_size=10).repeat().batch(batch_size)
-val_ds = valid.map(preprocessing).repeat().batch(batch_size)
+train_ds = train.map(preprocessing).shuffle(buffer_size=10).repeat().batch(batch_size).prefetch(AUTOTUNE)
+val_ds = val.map(preprocessing).batch(1).prefetch(AUTOTUNE)'''
+
+
+def preprocessing2(low, high):
+    # high_img = tf.cast(tf.image.random_crop(high, size=(hr_img_size, hr_img_size, 3)), tf.float32)
+    high_img = tf.cast(tf.image.resize(high, [hr_img_size,hr_img_size]), tf.float32)
+    low_img = tf.image.resize(high_img, [lr_img_size, lr_img_size])
+    high_img, low_img = (high_img - 127.5) / 127.5, (low_img - 127.5) / 127.5
+    return low_img, high_img
+
+train_ds = train.map(preprocessing2).shuffle(buffer_size=len(train)).batch(batch_size).prefetch(AUTOTUNE)
+val_ds = val.map(preprocessing2).batch(1).prefetch(AUTOTUNE)
 
 def gen_res_block(input_layer):
 
@@ -127,10 +149,41 @@ def get_content_loss_vgg(hr_real, hr_fake):
 
     return mse(hr_real_feature_map, hr_fake_feature_map)
 
-generator_optimizer = optimizers.Adam()
-discriminator_optimizer = optimizers.Adam()
+generator_optimizer = optimizers.Adam(learning_rate=lr)
+discriminator_optimizer = optimizers.Adam(learning_rate=lr)
 
-def gaaaan(low_img, high_real):
+
+checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
+checkpoint = tf.train.Checkpoint(generator_optimizer=generator_optimizer,
+                                 discriminator_optimizer=discriminator_optimizer,
+                                 generator=generator,
+                                 discriminator=discriminator)
+
+
+def to_range(images, min_value=0, max_value=255):
+    return ((images + 1.) / 2. * (max_value - min_value) + min_value).astype(np.uint8)
+
+def generate_and_save_images(model, low, high, epoch):
+
+    pred = model(low, training=False)
+    # image = np.reshape(image, [200, 200, 3])
+    image_list = [low, pred, high]
+    image_name = ["Low image", "SRGAN result", "High image"]
+    for i, image in enumerate(image_list):
+        image = tf.squeeze(image, 0)
+        image = np.array(image)
+        image = to_range(image)
+
+        plt.subplot(1, 3, i+1)
+        plt.imshow(image)
+        plt.axis('off')
+        plt.title(image_name[i])
+    plt.tight_layout()
+    plt.show()
+    plt.savefig(os.path.join(output_dir, 'image_at_epoch_{:05d}.png'.format(epoch)))
+
+
+def train_step(low_img, high_real):
     with tf.GradientTape() as generator_tape, tf.GradientTape() as discriminator_tape:
         fake = generator(low_img, training=True)
 
@@ -148,26 +201,22 @@ def gaaaan(low_img, high_real):
 
     return perceptual_loss, discriminator_loss
 
-generator_losses = metrics.Mean()
-discriminator_losses = metrics.Mean()
+test_iter = iter(val_ds)
 
 for epoch in range(epochs):
-    for i, (low_img, high_img) in enumerate(train_ds):
-        g_loss, d_loss = gaaaan(low_img, high_img)
+    start_time = time.time()
 
-        generator_losses.update_state(g_loss)
-        discriminator_losses.update_state(d_loss)
+    for low_img, high_img in train_ds:
+        g_loss, d_loss = train_step(low_img, high_img)
 
-        if (i + 1) % 10 == 0:
-            print(
-                f"EPOCH[{epoch}] - STEP[{i + 1}] \nGenerator_loss:{generator_losses.result():.4f} \nDiscriminator_loss:{discriminator_losses.result():.4f}",
-                end="\n\n")
+    if (epoch+1) % 3 == 0:
+        checkpoint.save(file_prefix=checkpoint_prefix)
+        display.clear_output(wait=True)
+        low, high = next(test_iter)
+        generate_and_save_images(generator, low, high, epoch+1)
 
-        if (i + 1) == 200:
-            break
+    print(f'epoch = {epoch + 1} / time = {time.time() - start_time} / gen_loss = {g_loss} / disc_loss = {d_loss}')
 
-    generator_losses.reset_states()
-    discriminator_losses.reset_states()
 
 def result(image):
     image = np.array(image)
@@ -195,7 +244,7 @@ temp = Image.open('./data/sample.jpg')
 
 contrast(temp)
 
-generator.evaluate(val_ds)
+#generator.evaluate(val_ds)
 
 temp = np.array(temp)
 temp = resize(temp, (25, 25, 3))
@@ -224,3 +273,25 @@ def apply_srgan(image):
 
 plt.imshow(apply_srgan(img_resize))
 plt.show()
+
+a = [1, 2, 4]
+for i, num in enumerate(a):
+    print(num)
+
+
+ran = tf.random.normal(shape=(10,10,3))
+ran2 = ran
+ran3 = ran
+
+a_list = [ran, ran2, ran3]
+
+for i, image in enumerate(a_list):
+    #image = tf.squeeze(image, 0)
+    #image = to_range(image)
+
+    plt.subplot(1, 3, i + 1)
+    plt.imshow(image)
+    plt.axis('off')
+    plt.show()
+
+ran
