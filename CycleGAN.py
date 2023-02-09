@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
 import IPython.display as display
+import skimage.io as iio
+import matplotlib.pyplot as plt
 from keras.layers import Conv2D, BatchNormalization, Activation, add, Input, Conv2DTranspose, ZeroPadding2D, LeakyReLU
 from tensorflow_addons.layers import InstanceNormalization
 from keras.models import Model
@@ -10,7 +12,6 @@ from tensorflow.keras import optimizers
 from glob import glob
 from tensorflow import keras
 import os, random, functools, tqdm, imageio, IPython
-# %load_ext tensorboard
 
 input_shape = (128, 128, 3)
 hidden_layers = 3
@@ -464,3 +465,36 @@ with imageio.get_writer(anim_file, mode='I') as writer:
 
 if IPython.version_info > (6,2,0,''):
     display.Image(filename=anim_file)
+
+
+Gen_a_to_b.save_weights('./model/atob.h5')
+Gen_b_to_a.save_weights('./model/btoa.h5')
+
+cyclegan = build_generator()
+cyclegan_restore = build_generator()
+
+cyclegan.load_weights('./model/btoa.h5')
+cyclegan_restore.load_weights('./model/atob.h5')
+
+from skimage.transform import resize
+
+def change_gogh(raw_image):
+    image = np.array(raw_image)
+    assert image.shape[-1] == 3, 'This image is not color image'
+    image = tf.image.resize(image, (128, 128))
+    image = (image - 127.5) / 127.5
+
+    image_gogh = cyclegan(tf.expand_dims(image, 0), training=False)
+    image_restore = cyclegan_restore(image_gogh, training=False)
+
+    image_join = np.concatenate([image, tf.squeeze(image_gogh, 0), tf.squeeze(image_restore, 0)], axis=1)
+
+    image_join = ((image_join + 1.) / 2. * (255 - 0) + 0).astype(np.uint8)
+
+    plt.imshow(image_join)
+    plt.show()
+
+
+sample = Image.open('./data/sample.jpg')
+
+change_gogh(sample)
