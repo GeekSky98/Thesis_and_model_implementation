@@ -1,7 +1,7 @@
 import tensorflow_datasets as tfds
 import matplotlib.pyplot as plt
 import IPython.display as display
-from keras.layers import Conv2D, BatchNormalization, Input, Add, PReLU, Lambda, LeakyReLU, Dense
+from keras.layers import Conv2D, BatchNormalization, Input, Add, PReLU, Lambda, LeakyReLU, Dense, Flatten, Dropout
 from keras.losses import BinaryCrossentropy, MeanSquaredError
 import tensorflow as tf
 import numpy as np
@@ -13,19 +13,20 @@ from tensorflow.keras import optimizers, metrics
 from skimage.transform import resize
 import time, os
 
+#L1 = keras.regularizers.l2(2e-4)
 hr_img_size = 100
 lr_img_size = 25
 batch_size = 16
-epochs = 100
+epochs = 5000
 lr = 1e-4
 AUTOTUNE = tf.data.AUTOTUNE
 
 
 cur_dir = os.getcwd()
 
-cgan_path = os.path.join(cur_dir, 'cgan')
-checkpoint_dir = os.path.join(cgan_path, 'checkpoint')
-output_dir = os.path.join(cgan_path, 'output')
+srgan_path = os.path.join(cur_dir, 'srgan')
+checkpoint_dir = os.path.join(srgan_path, 'checkpoint')
+output_dir = os.path.join(srgan_path, 'output')
 
 train, val = tfds.load("div2k/bicubic_x4", split = ['train', 'validation'], as_supervised=True)
 
@@ -54,10 +55,10 @@ val_ds = val.map(preprocessing2).batch(1).prefetch(AUTOTUNE)
 def gen_res_block(input_layer):
 
     x = Conv2D(filters=64, kernel_size=3, strides=1, padding='same')(input_layer)
-    x = BatchNormalization()(x)
+    x = BatchNormalization(momentum=0.8)(x)
     x = PReLU(shared_axes=[1,2])(x)
     x = Conv2D(filters=64, kernel_size=3, strides=1, padding='same')(x)
-    x = BatchNormalization()(x)
+    x = BatchNormalization(momentum=0.8)(x)
     result = Add()([input_layer, x])
 
     return result
@@ -74,14 +75,14 @@ def disc_conv_block(input_layer, n_filter=64, first_step=False):
 
     if first_step:
         x = Conv2D(filters=n_filter, kernel_size=3, strides=2, padding='same')(input_layer)
-        x = BatchNormalization()(x)
-        x = LeakyReLU()(x)
+        x = BatchNormalization(momentum=0.8)(x)
+        x = LeakyReLU(alpha=0.2)(x)
     else:
         x = input_layer
         for stride in range(1,3):
             x = Conv2D(filters=n_filter, kernel_size=3, strides=stride, padding='same')(x)
-            x = BatchNormalization()(x)
-            x = LeakyReLU()(x)
+            x = BatchNormalization(momentum=0.8)(x)
+            x = LeakyReLU(alpha=0.2)(x)
 
     return x
 
@@ -108,7 +109,7 @@ def build_generator():
 
 def build_discriminator():
 
-    inputs = Input((None, None, 3))
+    inputs = Input((hr_img_size, hr_img_size, 3))
 
     x = Conv2D(filters=64, kernel_size=3, strides=1, padding='same')(inputs)
     x = LeakyReLU()(x)
@@ -118,8 +119,10 @@ def build_discriminator():
     for num in [128, 256, 512]:
         x = disc_conv_block(x, n_filter=num)
 
+    x = Flatten()(x)
     x = Dense(1024)(x)
-    x = LeakyReLU()(x)
+    x = LeakyReLU(alpha=0.2)(x)
+    #x = Dropout(0.5)(x)
     outputs = Dense(1, activation='sigmoid')(x)
 
     return Model(inputs, outputs)
@@ -127,7 +130,8 @@ def build_discriminator():
 vgg_transfer = vgg.VGG19(include_top=False, weights='imagenet', input_shape=(None, None, 3))
 vgg_transfer.summary()
 
-vgg_model = Model(vgg_transfer.input, vgg_transfer.get_layer('block5_conv4').output)
+#vgg_transfer.get_layer('block5_conv4').output
+vgg_model = Model(vgg_transfer.input, vgg_transfer.layers[20].output)
 
 generator = build_generator()
 discriminator = build_discriminator()
@@ -138,8 +142,10 @@ def get_generator_loss(fake_output):
     return binaryCE(tf.ones_like(fake_output), fake_output)
 
 def get_discriminator_loss(real_output, fake_output):
-    return binaryCE(tf.ones_like(real_output), real_output) + \
-           binaryCE(tf.zeros_like(fake_output), fake_output)
+    real_loss = binaryCE(tf.ones_like(real_output), real_output)
+    fake_loss = binaryCE(tf.zeros_like(fake_output), fake_output)
+    return real_loss + fake_loss
+
 
 def get_content_loss_vgg(hr_real, hr_fake):
     hr_real, hr_fake = vgg.preprocess_input(hr_real), vgg.preprocess_input(hr_fake)
@@ -179,8 +185,9 @@ def generate_and_save_images(model, low, high, epoch):
         plt.axis('off')
         plt.title(image_name[i])
     plt.tight_layout()
-    plt.show()
     plt.savefig(os.path.join(output_dir, 'image_at_epoch_{:05d}.png'.format(epoch)))
+    plt.show()
+
 
 
 def train_step(low_img, high_real):
@@ -209,7 +216,7 @@ for epoch in range(epochs):
     for low_img, high_img in train_ds:
         g_loss, d_loss = train_step(low_img, high_img)
 
-    if (epoch+1) % 3 == 0:
+    if (epoch+1) % 10 == 0:
         checkpoint.save(file_prefix=checkpoint_prefix)
         display.clear_output(wait=True)
         low, high = next(test_iter)
@@ -293,5 +300,3 @@ for i, image in enumerate(a_list):
     plt.imshow(image)
     plt.axis('off')
     plt.show()
-
-ran
