@@ -9,10 +9,10 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import BinaryCrossentropy
 from sklearn.preprocessing import OrdinalEncoder
 from glob import glob
-import os, time
+import os, time, datetime
 
 N_BATCH = 64
-EPOCHS = 4000
+EPOCHS = 6000
 LATENT_DEPTH = 100
 IMAGE_SIZE = 100
 LR = 1e-4
@@ -175,9 +175,14 @@ for epoch in range(EPOCHS):
     for batch, label in train_ds:
         gen_loss, disc_loss = train_step(batch, label)
 
-    if (epoch+1) % 20 == 0:
+    if (epoch+1) % 30 == 0:
         checkpoint.save(file_prefix=checkpoint_prefix)
         display.clear_output(wait=True)
         generate_and_save_images(generator, label[0], epoch+1)
 
-    print(f'epoch = {epoch+1} / time = {time.time()-start_time} / gen_loss = {gen_loss} / disc_loss = {disc_loss}')
+    TIME = time.time()-start_time
+    EXPECT = str(datetime.timedelta(seconds = round((EPOCHS-(epoch+1)) * TIME)))
+    print(f'epoch = {epoch+1} / time = {TIME} / gen_loss = {gen_loss} / disc_loss = {disc_loss} / expect = {EXPECT}')
+
+generator.save_weights('./model/cgan_weight.h5')
+generator.save('./model/cgan.h5')
