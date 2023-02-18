@@ -36,7 +36,7 @@ len(image_files)
 
 for path in image_files:
   temp = np.array(Image.open(os.path.join(last_data_dir, path))).shape
-  if temp != (img_size, img_size):
+  if temp != (img_size, img_size, 3):
     os.remove(os.path.join(last_data_dir, path))
   else:
     continue
@@ -180,4 +180,28 @@ def contrast_image(index):
   plt.title("result / original image")
   plt.show()
 
-contrast_image(80)
+model_unet_graytocolor = tf.keras.models.load_model("./model/model_unet_graytocolor.h5")
+
+model_unet_graytocolor.compile(
+  loss = "mae",
+  optimizer = keras.optimizers.Adam(lr_schedule),
+  metrics = "accuracy"
+)
+
+def contrast(index):
+
+  plt.subplot(1, 3, 1)
+  plt.imshow(train_x[index], cmap='gray')
+  plt.title("Gray Scale Image")
+  plt.subplot(1, 3, 2)
+  plt.imshow(model_unet_graytocolor.predict(np.expand_dims(train_x[index], 0)).reshape(150, 150, 3))
+  plt.title("Gray To Color")
+  plt.subplot(1, 3, 3)
+  plt.imshow(train_y[index])
+  plt.title("Color Image")
+
+  plt.tight_layout()
+  plt.show()
+
+
+contrast(113)

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 channel = 3
 batch_size = 32
-epoch = 100
+epoch = 50
 AUTOTUNE = tf.data.AUTOTUNE
 
 div2k_data = tfds.image.Div2k(config="bicubic_x4")
@@ -164,7 +164,7 @@ model.compile(
 
 
 filename = 'checkpoint-epoch-{}-batch-{}-trial-001.h5'.format(epoch, batch_size)
-checkpoint = ModelCheckpoint(filename, monitor='PSNR', verbose=1, save_best_only=True, mode='auto')
+checkpoint = ModelCheckpoint(filename, monitor='PSNR', verbose=1, save_best_only=True, mode='max')
 earlystopping = EarlyStopping(monitor='PSNR', patience=20)
 
 
@@ -172,25 +172,22 @@ model.fit(
     train_ds,
     validation_data=val_ds,
     epochs=epoch,
-    steps_per_epoch=300,
-    callbacks=[checkpoint,earlystopping],
+    steps_per_epoch=1250,
+    #callbacks=[checkpoint,earlystopping],
     verbose=1
 )
 
 def result(num):
     for lowres, highres in val.take(num):
-        lowres = tf.image.random_crop(lowres, (150, 150, 3))
+        lowres = tf.image.random_crop(lowres, (50, 50, 3))
         pred = model.predict_step(lowres)
-    plt.figure(figsize=(20, 10))
-    plt.subplot(1, 3, 1), plt.imshow(lowres), plt.title("Low")
-    plt.subplot(1, 3, 2), plt.imshow(pred), plt.title("EDSR")
-    plt.subplot(1, 3, 3), plt.imshow(highres), plt.title("HR")
+    plt.subplot(1, 2, 1), plt.imshow(lowres), plt.title("Low"), plt.axis('off')
+    plt.subplot(1, 2, 2), plt.imshow(pred), plt.title("EDSR"), plt.axis('off')
     plt.show()
-    print(lowres.shape, pred.shape)
 
-result(4)
+result(25)
 
-model.save_weights('./model/EDSR_weight')
+model.save_weights('./model/EDSR_weightttttt')
 
 model2 = build_edsr()
 model2.load_weights('./model/EDSR_weight')
@@ -200,10 +197,26 @@ import numpy as np
 from PIL import Image
 sample = Image.open('./data/sample.jpg')
 sample = np.array(sample)
-sample = tf.image.random_crop(sample, (150,150,3))
+sample = tf.image.random_crop(sample, (50,50,3))
 pred = model.predict_step(sample)
 
-plt.figure(figsize=(20,10))
 plt.subplot(1, 2, 1), plt.imshow(sample), plt.title("Low")
 plt.subplot(1, 2, 2), plt.imshow(pred), plt.title("EDSR")
 plt.show()
+
+'''from skimage.transform import resize
+def contrast(imag_size):
+    image = Image.open('./data/sample.jpg')
+    image = np.array(image)
+    image2 = resize(image, (imag_size, imag_size))
+    row_image = resize(image2, (imag_size//4, imag_size//4))
+    row_image2 = tf.image.resize(image, (imag_size//4, imag_size//4))
+    pred= model.predict_step(row_image2)
+    
+    plt.subplot(1, 3, 1), plt.imshow(row_image), plt.title("Low image")
+    plt.subplot(1, 3, 2), plt.imshow(pred), plt.title("EDSR")
+    plt.subplot(1, 3, 3), plt.imshow(image), plt.title("high image")
+    
+    plt.show()
+    
+contrast(200)'''

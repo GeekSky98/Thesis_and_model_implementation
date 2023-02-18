@@ -492,9 +492,10 @@ def change_gogh(raw_image):
     image_join = ((image_join + 1.) / 2. * (255 - 0) + 0).astype(np.uint8)
 
     plt.imshow(image_join)
+    plt.axis('off')
     plt.show()
 
 
-sample = Image.open('./data/sample.jpg')
+sample = Image.open('./data/sample2.jpg')
 
 change_gogh(sample)

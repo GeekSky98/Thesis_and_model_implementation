@@ -530,7 +530,7 @@ def prepare_image(image):
 val_dataset = tfds.load("coco/2017", split="validation", data_dir="data/data")
 int2str = dataset_info.features["objects"]["label"].int2str
 
-for sample in val_dataset.take(4):
+for sample in val_dataset.take(50):
     image = tf.cast(sample["image"], dtype=tf.float32)
     input_image, ratio = prepare_image(image)
     detections = inference_model.predict(input_image)
