@@ -1,3 +1,5 @@
+import sys
+sys.path.append('C:/Users/whgks/PycharmProjects/model/YOLOv1')
 import tensorflow as tf
 import numpy as np
 from utils import iou

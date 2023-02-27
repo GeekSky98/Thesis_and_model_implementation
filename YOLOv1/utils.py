@@ -43,11 +43,11 @@ def find_max_confidence_bounding_box(bounding_box_info_list):
 
 def yolo_format_to_bounding_box_dict(xcenter, ycenter, box_w, box_h, class_name, confidence):
   bounding_box_info = {}
-  bounding_box_info['left'] = int(xcenter - (box_w / 2))
-  bounding_box_info['top'] = int(ycenter - (box_h / 2))
-  bounding_box_info['right'] = int(xcenter + (box_w / 2))
-  bounding_box_info['bottom'] = int(ycenter + (box_h / 2))
-  bounding_box_info['class_name'] = class_name
+  bounding_box_info['xmin'] = int(xcenter - (box_w / 2))
+  bounding_box_info['ymin'] = int(ycenter - (box_h / 2))
+  bounding_box_info['xmax'] = int(xcenter + (box_w / 2))
+  bounding_box_info['ymax'] = int(ycenter + (box_h / 2))
+  bounding_box_info['class'] = class_name
   bounding_box_info['confidence'] = confidence
 
   return bounding_box_info

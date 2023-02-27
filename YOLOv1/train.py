@@ -14,13 +14,15 @@ import time, datetime
 import cv2
 
 validation_steps = 50
-num_epochs = 135
+# hane to change later (135)
+num_epochs = 1
 init_learning_rate = 0.0001
 lr_decay_rate = 0.5
 lr_decay_steps = 2000
 num_visualize_image = 8
 
-batch_size = 64
+# have to change later (32 or 64)
+batch_size = 128
 test_batch_size = 1
 input_width = 224
 input_height = 224
@@ -39,13 +41,16 @@ label_dict = {
 class_to_label_dict = {v: k for k, v in label_dict.items()}
 
 color_list = generate_color(num_classes)
-
+'''
 voc2007_test_split_data = tfds.load("voc/2007", split=tfds.Split.TEST, batch_size=1)
 voc2012_train_split_data = tfds.load("voc/2012", split=tfds.Split.TRAIN, batch_size=1)
 voc2012_validation_split_data = tfds.load("voc/2012", split=tfds.Split.VALIDATION, batch_size=1)
 train_data = voc2007_test_split_data.concatenate(voc2012_train_split_data).concatenate(voc2012_validation_split_data)
 n_data = round(len(train_data))
-
+'''
+# Temporary data because of test
+train_data = tfds.load("voc/2007", split=tfds.Split.TEST, batch_size=1)
+n_data = round(len(train_data))
 test_data = tfds.load("voc/2007", split=tfds.Split.TRAIN, batch_size=1)
 
 def predicate(x, allowed_labels=tf.constant([14.0])):
@@ -102,16 +107,14 @@ def calculate_loss(model, batch_image, batch_bbox, batch_labels):
 
 def test_function(model):
     for data in test_data:
-        image = data['image']
-        bbox = data['objects']['bbox']
-        labels = features['objects']['label']
+        image = tf.squeeze(data['image'], 1)
+        bbox = tf.squeeze(data['objects']['bbox'], 1)
+        labels = tf.squeeze(data['objects']['label'], 1)
 
         image, bbox, labels = process_each_ground_truth(image[0], bbox[0], labels[0], input_width, input_height)
 
         pred = reshape_yolo_preds(model(tf.expand_dims(image, 0)))
-
         pred_bbox = pred[0, :, :, num_classes+boxes_per_cell:].reshape(cell_size, cell_size, boxes_per_cell, 4)
-
         pred_confidence = pred[0, :, :, num_classes:num_classes+boxes_per_cell].reshape(cell_size, cell_size,
                                                                                         boxes_per_cell, 1)
 
@@ -174,7 +177,7 @@ def train_step(model, optimizer, batch_image, batch_bbox, batch_labels):
 
   return total_loss, coord_loss, object_loss, noobject_loss, class_loss
 
-n_iteration = n_data/num_epochs
+iteration_per_epoch = n_data/batch_size
 for epoch in range(num_epochs):
     start_time = time.time()
     for iteration, features in enumerate(train_data):
@@ -189,17 +192,22 @@ for epoch in range(num_epochs):
         total_loss, coord_loss, object_loss, noobject_loss, class_loss = train_step(model_yolo, optimizer, batch_image,
                                                                                     batch_bbox, batch_labels)
 
-        if iteration % 20 == 0:
+        if (iteration + 1) % 20 == 0:
             spent_time = str(datetime.timedelta(seconds=round(time.time() - start_time)))
-            least_iteration = n_iteration-iteration
+            least_iteration = iteration_per_epoch-iteration
             print(f'iteration={iteration}, Time spent={spent_time}, least iteration={least_iteration}')
 
     if (epoch + 1) % 1 == 0:
         checkpoint.save(file_prefix=checkpoint_prefix)
         display.clear_output(wait=True)
-        test_function(model_yolo)
+        #test_function(model_yolo)
 
     TIME = time.time() - start_time
     EXPECT = str(datetime.timedelta(seconds=round((num_epochs - (epoch + 1)) * TIME)))
     print(f'epoch = {epoch + 1} / time = {TIME} / total_loss = {total_loss} / expect = {EXPECT}')
     print(f'coord_loss={coord_loss}, object_loss={object_loss}, noobject_loss={noobject_loss}, class_loss={class_loss}')
+
+
+model_yolo.save_weights('./saved_model.h5')
+
+test_function(model_yolo)
