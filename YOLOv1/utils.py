@@ -92,4 +92,4 @@ def generate_color(num_classes):
   np.random.shuffle(colors)
   np.random.seed(None)
 
-  return
+  return colors

@@ -36,7 +36,7 @@ object_scale = 1
 noobject_scale = 0.5
 
 label_dict = {
-  0: "person"
+  0:"person"
 }
 class_to_label_dict = {v: k for k, v in label_dict.items()}
 
@@ -64,6 +64,7 @@ train_data = train_data.filter(predicate)
 train_data = train_data.padded_batch(batch_size)
 
 test_data = test_data.filter(predicate)
+test_data = test_data.padded_batch(test_batch_size)
 
 def reshape_yolo_preds(preds):
   return tf.reshape(preds, [tf.shape(preds)[0], cell_size, cell_size, num_classes + 5 * boxes_per_cell])
@@ -107,9 +108,9 @@ def calculate_loss(model, batch_image, batch_bbox, batch_labels):
 
 def test_function(model):
     for data in test_data:
-        image = tf.squeeze(data['image'], 1)
-        bbox = tf.squeeze(data['objects']['bbox'], 1)
-        labels = tf.squeeze(data['objects']['label'], 1)
+        image = tf.squeeze(data['image'], 0)
+        bbox = tf.squeeze(data['objects']['bbox'], 0)
+        labels = tf.squeeze(data['objects']['label'], 0)
 
         image, bbox, labels = process_each_ground_truth(image[0], bbox[0], labels[0], input_width, input_height)
 
@@ -208,6 +209,59 @@ for epoch in range(num_epochs):
     print(f'coord_loss={coord_loss}, object_loss={object_loss}, noobject_loss={noobject_loss}, class_loss={class_loss}')
 
 
-model_yolo.save_weights('./saved_model.h5')
+model_yolo.save_weights('./YOLOv1/saved_model/yolo.h5')
 
 test_function(model_yolo)
+
+model_yolo.load_weights("./saved_model/")
+
+
+def test_function(model):
+    for data in test_data.take(1):
+        image = tf.squeeze(data['image'], 1)
+        bbox = tf.squeeze(data['objects']['bbox'], 1)
+        labels = tf.squeeze(data['objects']['label'], 1)
+
+        image, bbox, labels = process_each_ground_truth(image[0], bbox[0], labels[0], input_width, input_height)
+
+        pred = reshape_yolo_preds(model(tf.expand_dims(image, 0)))
+        pred_bbox = pred[0, :, :, num_classes+boxes_per_cell:]
+        pred_bbox = tf.reshape(pred_bbox, [cell_size, cell_size, boxes_per_cell, 4])
+        pred_confidence = pred[0, :, :, num_classes:num_classes+boxes_per_cell]
+        pred_confidence = tf.reshape(pred_confidence, [cell_size, cell_size, boxes_per_cell, 1])
+
+        pred_class = tf.argmax(pred[0, :, :, :num_classes], axis=2)
+
+        bounding_box_list = []
+        for i in range(cell_size):
+            for j in range(cell_size):
+                for k in range(boxes_per_cell):
+                    pred_xcenter = pred_bbox[i][j][k][0]
+                    pred_ycenter = pred_bbox[i][j][k][1]
+                    pred_width = tf.minimum(input_width * 1.0, tf.maximum(0.0, pred_bbox[i][j][k][2]))
+                    pred_height = tf.minimum(input_height * 1.0, tf.maximum(0.0, pred_bbox[i][j][k][3]))
+
+                    pred_class_name = label_dict[pred_class[i][j].numpy()]
+                    pred_confidence_value = pred_confidence[i][j][k].numpy()
+
+                    bounding_box_list.append(
+                        yolo_format_to_bounding_box_dict(pred_xcenter, pred_ycenter, pred_width, pred_height,
+                                                         pred_class_name, pred_confidence_value)
+                    )
+
+        bounding_box = find_max_confidence_bounding_box(bounding_box_list)
+
+        draw_bounding_box_and_label_info(
+            image,
+            bounding_box['xmin'],
+            bounding_box['ymin'],
+            bounding_box['xmax'],
+            bounding_box['ymax'],
+            bounding_box['class'],
+            bounding_box['confidence'],
+            color_list[class_to_label_dict[bounding_box['class']]]
+        )
+
+        plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        plt.title(f'{epoch}epoch result')
+        plt.show()
