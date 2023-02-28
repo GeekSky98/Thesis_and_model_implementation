@@ -14,14 +14,12 @@ import time, datetime
 import cv2
 
 validation_steps = 50
-# hane to change later (135)
-num_epochs = 1
+num_epochs = 135
 init_learning_rate = 0.0001
 lr_decay_rate = 0.5
 lr_decay_steps = 2000
 num_visualize_image = 8
 
-# have to change later (32 or 64)
 batch_size = 128
 test_batch_size = 1
 input_width = 224
@@ -41,16 +39,13 @@ label_dict = {
 class_to_label_dict = {v: k for k, v in label_dict.items()}
 
 color_list = generate_color(num_classes)
-'''
+
 voc2007_test_split_data = tfds.load("voc/2007", split=tfds.Split.TEST, batch_size=1)
 voc2012_train_split_data = tfds.load("voc/2012", split=tfds.Split.TRAIN, batch_size=1)
 voc2012_validation_split_data = tfds.load("voc/2012", split=tfds.Split.VALIDATION, batch_size=1)
 train_data = voc2007_test_split_data.concatenate(voc2012_train_split_data).concatenate(voc2012_validation_split_data)
 n_data = round(len(train_data))
-'''
-# Temporary data because of test
-train_data = tfds.load("voc/2007", split=tfds.Split.TEST, batch_size=1)
-n_data = round(len(train_data))
+
 test_data = tfds.load("voc/2007", split=tfds.Split.TRAIN, batch_size=1)
 
 def predicate(x, allowed_labels=tf.constant([14.0])):
@@ -107,120 +102,10 @@ def calculate_loss(model, batch_image, batch_bbox, batch_labels):
   return total_loss, coord_loss, object_loss, noobject_loss, class_loss
 
 def test_function(model):
-    for data in test_data:
-        image = tf.squeeze(data['image'], 0)
-        bbox = tf.squeeze(data['objects']['bbox'], 0)
-        labels = tf.squeeze(data['objects']['label'], 0)
-
-        image, bbox, labels = process_each_ground_truth(image[0], bbox[0], labels[0], input_width, input_height)
-
-        pred = reshape_yolo_preds(model(tf.expand_dims(image, 0)))
-        pred_bbox = pred[0, :, :, num_classes+boxes_per_cell:].reshape(cell_size, cell_size, boxes_per_cell, 4)
-        pred_confidence = pred[0, :, :, num_classes:num_classes+boxes_per_cell].reshape(cell_size, cell_size,
-                                                                                        boxes_per_cell, 1)
-
-        pred_class = tf.argmax(pred[0, :, :, :num_classes], axis=2)
-
-        bounding_box_list = []
-        for i in range(cell_size):
-            for j in range(cell_size):
-                for k in range(boxes_per_cell):
-                    pred_xcenter = pred_bbox[i][j][k][0]
-                    pred_ycenter = pred_bbox[i][j][k][1]
-                    pred_width = tf.minimum(input_width * 1.0, tf.maximum(0.0, pred_bbox[i][j][k][2]))
-                    pred_height = tf.minimum(input_height * 1.0, tf.maximum(0.0, pred_bbox[i][j][k][3]))
-
-                    pred_class_name = class_to_label_dict[pred_class[i][j].numpy()]
-                    pred_confidence_value = pred_confidence[i][j][k].numpy()
-
-                    bounding_box_list.append(
-                        yolo_format_to_bounding_box_dict(pred_xcenter, pred_ycenter, pred_width, pred_height,
-                                                         pred_class_name, pred_confidence_value)
-                    )
-
-        bounding_box = find_max_confidence_bounding_box(bounding_box_list)
-
-        draw_bounding_box_and_label_info(
-            image,
-            bounding_box['xmin'],
-            bounding_box['ymin'],
-            bounding_box['xmax'],
-            bounding_box['ymax'],
-            bounding_box['class'],
-            bounding_box['confidence'],
-            color_list[class_to_label_dict[bounding_box['class']]]
-        )
-
-        plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        plt.title(f'{epoch}epoch result')
-        plt.show()
-
-lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
-  init_learning_rate,
-  decay_steps=lr_decay_steps,
-  decay_rate=lr_decay_rate,
-  staircase=True)
-
-optimizer = tf.optimizers.Adam(lr_schedule)
-
-model_yolo = YOLOv1(input_height, input_width, cell_size, boxes_per_cell, num_classes)
-
-checkpoint_prefix = os.path.join('./checkpoint', 'ckpt')
-checkpoint = tf.train.Checkpoint(model = model_yolo)
-
-def train_step(model, optimizer, batch_image, batch_bbox, batch_labels):
-  with tf.GradientTape() as tape:
-    total_loss, coord_loss, object_loss, noobject_loss, class_loss = calculate_loss(model, batch_image,
-                                                                                    batch_bbox, batch_labels)
-
-  gradients = tape.gradient(total_loss, model.trainable_variables)
-  optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
-  return total_loss, coord_loss, object_loss, noobject_loss, class_loss
-
-iteration_per_epoch = n_data/batch_size
-for epoch in range(num_epochs):
-    start_time = time.time()
-    for iteration, features in enumerate(train_data):
-        batch_image = features['image']
-        batch_bbox = features['objects']['bbox']
-        batch_labels = features['objects']['label']
-
-        batch_image = tf.squeeze(batch_image, axis=1)
-        batch_bbox = tf.squeeze(batch_bbox, axis=1)
-        batch_labels = tf.squeeze(batch_labels, axis=1)
-
-        total_loss, coord_loss, object_loss, noobject_loss, class_loss = train_step(model_yolo, optimizer, batch_image,
-                                                                                    batch_bbox, batch_labels)
-
-        if (iteration + 1) % 20 == 0:
-            spent_time = str(datetime.timedelta(seconds=round(time.time() - start_time)))
-            least_iteration = iteration_per_epoch-iteration
-            print(f'iteration={iteration}, Time spent={spent_time}, least iteration={least_iteration}')
-
-    if (epoch + 1) % 1 == 0:
-        checkpoint.save(file_prefix=checkpoint_prefix)
-        display.clear_output(wait=True)
-        #test_function(model_yolo)
-
-    TIME = time.time() - start_time
-    EXPECT = str(datetime.timedelta(seconds=round((num_epochs - (epoch + 1)) * TIME)))
-    print(f'epoch = {epoch + 1} / time = {TIME} / total_loss = {total_loss} / expect = {EXPECT}')
-    print(f'coord_loss={coord_loss}, object_loss={object_loss}, noobject_loss={noobject_loss}, class_loss={class_loss}')
-
-
-model_yolo.save_weights('./YOLOv1/saved_model/yolo.h5')
-
-test_function(model_yolo)
-
-model_yolo.load_weights("./saved_model/")
-
-
-def test_function(model):
     for data in test_data.take(1):
-        image = tf.squeeze(data['image'], 1)
-        bbox = tf.squeeze(data['objects']['bbox'], 1)
-        labels = tf.squeeze(data['objects']['label'], 1)
+        image = tf.squeeze(data['image'], axis=1)
+        bbox = tf.squeeze(data['objects']['bbox'], axis=1)
+        labels = tf.squeeze(data['objects']['label'], axis=1)
 
         image, bbox, labels = process_each_ground_truth(image[0], bbox[0], labels[0], input_width, input_height)
 
@@ -262,6 +147,66 @@ def test_function(model):
             color_list[class_to_label_dict[bounding_box['class']]]
         )
 
-        plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        plt.imshow(image.astype(np.uint8))
         plt.title(f'{epoch}epoch result')
         plt.show()
+
+lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+  init_learning_rate,
+  decay_steps=lr_decay_steps,
+  decay_rate=lr_decay_rate,
+  staircase=True)
+
+optimizer = tf.optimizers.Adam(lr_schedule)
+
+model_yolo = YOLOv1(input_height, input_width, cell_size, boxes_per_cell, num_classes)
+
+checkpoint_prefix = os.path.join('./checkpoint', 'ckpt')
+checkpoint = tf.train.Checkpoint(model = model_yolo)
+
+def train_step(model, optimizer, batch_image, batch_bbox, batch_labels):
+  with tf.GradientTape() as tape:
+    total_loss, coord_loss, object_loss, noobject_loss, class_loss = calculate_loss(model, batch_image,
+                                                                                    batch_bbox, batch_labels)
+
+  gradients = tape.gradient(total_loss, model.trainable_variables)
+  optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+  return total_loss, coord_loss, object_loss, noobject_loss, class_loss
+
+iteration_per_epoch = n_data/batch_size
+for epoch in range(num_epochs):
+    start_time = time.time()
+    for iteration, features in enumerate(train_data):
+        batch_image = features['image']
+        batch_bbox = features['objects']['bbox']
+        batch_labels = features['objects']['label']
+
+        batch_image = tf.squeeze(batch_image, axis=1)
+        batch_bbox = tf.squeeze(batch_bbox, axis=1)
+        batch_labels = tf.squeeze(batch_labels, axis=1)
+
+        total_loss, coord_loss, object_loss, noobject_loss, class_loss = train_step(model_yolo, optimizer, batch_image,
+                                                                                    batch_bbox, batch_labels)
+
+        if (iteration + 1) % 30 == 0:
+            spent_time = str(datetime.timedelta(seconds=round(time.time() - start_time)))
+            least_iteration = iteration_per_epoch-iteration
+            print(f'iteration={iteration}, Time spent={spent_time}, least iteration={least_iteration}')
+
+    if (epoch + 1) % 5 == 0:
+        checkpoint.save(file_prefix=checkpoint_prefix)
+        display.clear_output(wait=True)
+        test_function(model_yolo)
+
+    TIME = time.time() - start_time
+    EXPECT = str(datetime.timedelta(seconds=round((num_epochs - (epoch + 1)) * TIME)))
+    print(f'epoch = {epoch + 1} / time = {TIME} / total_loss = {total_loss} / expect = {EXPECT}')
+    print(f'coord_loss={coord_loss}, object_loss={object_loss}, noobject_loss={noobject_loss}, class_loss={class_loss}')
+
+
+model_yolo.save_weights('./YOLOv1/saved_model/yolo2.h5')
+
+test_function(model_yolo)
+
+model_yolo.load_weights("./saved_model/yolo.h5")
